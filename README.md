@@ -1,9 +1,8 @@
 # Murmur
 
-A lightweight, low-RAM speech-to-text app for Windows — like
-[Handy](https://handy.computer). Hold **Right-Alt**, speak, release, and the
-transcribed text is typed into whatever window has focus. Lives in the system
-tray and lets you switch Whisper models on the fly.
+A lightweight, low-RAM speech-to-text app for Windows. Hold **Right-Alt**,
+speak, release, and the transcribed text is typed into whatever window has
+focus. Lives in the system tray and lets you switch Whisper models on the fly.
 
 Uses [faster-whisper](https://github.com/SYSTRAN/faster-whisper) (CTranslate2).
 With int8 quantization the model memory footprint is small:
@@ -83,7 +82,7 @@ Settings are saved to `%APPDATA%\Murmur\config.json`. Editable keys:
 
 Setting a fixed `language` (e.g. `en`) skips auto-detection and is a bit faster.
 
-## Build a Windows installer (ship it like Handy)
+## Build a Windows installer
 
 To turn this into a double-click `Setup.exe` with a Start Menu entry, optional
 "start with Windows", and an uninstaller:
@@ -105,7 +104,7 @@ Notes:
 - Edit the version/publisher in `installer.iss` and the model list / defaults in
   `murmur.py` as you like.
 
-## Releasing + updates (like Handy)
+## Releasing + updates
 
 **Automated release builds.** [`.github/workflows/build.yml`](.github/workflows/build.yml)
 builds the installer on GitHub's Windows runners. Push a version tag and it
