@@ -4,12 +4,15 @@
 # onedir (not onefile): faster startup and fewer antivirus false positives for
 # an ML app. Models are NOT bundled — they download to the HF cache on first use.
 
+import os
 from PyInstaller.utils.hooks import collect_all, collect_submodules
 
 datas, binaries, hiddenimports = [], [], []
 
-# faster-whisper and its native/runtime deps that PyInstaller misses by default.
-for pkg in ("faster_whisper", "ctranslate2", "av", "onnxruntime", "tokenizers"):
+# faster-whisper and its native/runtime deps that PyInstaller misses by default,
+# plus customtkinter (ships data files / themes).
+for pkg in ("faster_whisper", "ctranslate2", "av", "onnxruntime", "tokenizers",
+            "customtkinter"):
     try:
         d, b, h = collect_all(pkg)
         datas += d
@@ -19,8 +22,16 @@ for pkg in ("faster_whisper", "ctranslate2", "av", "onnxruntime", "tokenizers"):
         pass
 
 hiddenimports += collect_submodules("sounddevice")
-hiddenimports += ["numpy", "keyboard", "pystray", "PIL.Image", "PIL.ImageDraw",
-                  "tkinter", "tkinter.ttk"]
+hiddenimports += ["numpy", "keyboard", "pystray", "pystray._win32",
+                  "PIL.Image", "PIL.ImageDraw", "PIL.ImageTk",
+                  "tkinter", "tkinter.ttk", "darkdetect", "engine", "gui"]
+
+# bundle our own assets (logo + icon). make_icon.py generates these before the
+# PyInstaller step (see build.bat / the CI workflow).
+if os.path.exists("app.ico"):
+    datas.append(("app.ico", "."))
+if os.path.exists(os.path.join("assets", "logo.png")):
+    datas.append((os.path.join("assets", "logo.png"), "assets"))
 
 block_cipher = None
 

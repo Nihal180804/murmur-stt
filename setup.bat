@@ -1,5 +1,5 @@
 @echo off
-REM One-time setup: create a virtual environment and install dependencies.
+REM One-time setup: create a virtual environment, install deps, generate the logo.
 cd /d "%~dp0"
 
 echo Creating virtual environment (.venv)...
@@ -18,6 +18,9 @@ if errorlevel 1 (
     pause
     exit /b 1
 )
+
+echo Generating logo...
+".venv\Scripts\python.exe" make_icon.py
 
 echo.
 echo Done. Start the app with run.bat
