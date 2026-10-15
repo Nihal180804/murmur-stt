@@ -16,27 +16,34 @@ import threading
 import time
 
 APP_NAME = "Murmur"
-APP_VERSION = "1.1.1"  # keep in sync with installer.iss
+APP_VERSION = "1.1.2"  # keep in sync with installer.iss
 CONFIG_DIR = os.path.join(os.environ.get("APPDATA", os.path.expanduser("~")), APP_NAME)
 CONFIG_PATH = os.path.join(CONFIG_DIR, "config.json")
 
 SAMPLE_RATE = 16000
 
 # Built-in Whisper models with rough resident-RAM estimates (int8 / CPU).
+# Friendly model keys that map to a specific Hugging Face CTranslate2 repo
+# (faster-whisper doesn't know these short names natively).
+MODEL_ALIASES = {
+    "large-v3-turbo": "deepdml/faster-whisper-large-v3-turbo-ct2",
+}
+
 AVAILABLE_MODELS = [
     ("tiny", "~75 MB · fastest"),
     ("base", "~150 MB · balanced"),
     ("small", "~500 MB · accurate"),
-    ("medium", "~1.5 GB · high accuracy"),
-    ("large-v3", "~3 GB · best"),
     ("distil-small.en", "~250 MB · English, fast"),
-    ("distil-large-v3", "~1.5 GB · English, accurate"),
+    ("distil-large-v3", "~1.5 GB · English, fast + accurate"),
+    ("large-v3-turbo", "~1.6 GB · fast + accurate (recommended)"),
+    ("medium", "~1.5 GB · high accuracy"),
+    ("large-v3", "~3 GB · best, slowest"),
 ]
 
 # Approximate on-disk download sizes (MB), used for the download progress bar.
 APPROX_MB = {
     "tiny": 75, "base": 145, "small": 484, "medium": 1530, "large-v3": 3090,
-    "distil-small.en": 260, "distil-large-v3": 1510,
+    "distil-small.en": 260, "distil-large-v3": 1510, "large-v3-turbo": 1620,
 }
 
 IDLE_CHOICES = [
@@ -111,11 +118,14 @@ def total_ram_gb():
 
 
 def suggest_model():
+    # Prefer the fast+accurate models when there's RAM for them.
     ram = total_ram_gb()
-    if ram and ram < 6:
+    if ram and ram >= 12:
+        return "large-v3-turbo"   # multilingual, fast + accurate
+    if ram and ram >= 8:
+        return "distil-large-v3"  # English, fast + accurate
+    if ram and ram < 5:
         return "tiny"
-    if ram and ram >= 16:
-        return "small"
     return "base"
 
 
@@ -141,6 +151,8 @@ def fetch_latest_release(repo):
 def model_repo(key):
     """Hugging Face repo id for a built-in model key, or the key itself for a
     custom id / local path."""
+    if key in MODEL_ALIASES:
+        return MODEL_ALIASES[key]
     try:
         from faster_whisper.utils import _MODELS
         if key in _MODELS:
@@ -201,7 +213,21 @@ def download_model_blocking(key):
     if "/" not in repo and os.path.isdir(repo):
         return repo
     from faster_whisper.utils import download_model
-    return download_model(key)
+    return download_model(repo)
+
+
+def delete_model(key):
+    """Remove a downloaded model's cached files to free disk space. Returns the
+    number of MB freed. Never deletes a local-folder model (not ours to remove)."""
+    repo = model_repo(key)
+    if "/" not in repo:
+        return 0.0  # local path — leave the user's own files alone
+    cdir = _hub_cache_dir(repo)
+    freed = dir_size_mb(cdir)
+    if cdir and os.path.isdir(cdir):
+        import shutil
+        shutil.rmtree(cdir, ignore_errors=True)
+    return freed
 
 
 class MurmurEngine:
@@ -288,7 +314,7 @@ class MurmurEngine:
             self._set_status(LOADING)
             self.notify(f"Loading model '{key}' ({device}/{compute_type})…")
             self.model = None
-            self.model = WhisperModel(key, device=device, compute_type=compute_type)
+            self.model = WhisperModel(model_repo(key), device=device, compute_type=compute_type)
             self.model_key = key
         self._set_status(IDLE if not self.recording else self.status)
 

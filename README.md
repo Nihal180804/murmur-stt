@@ -40,10 +40,15 @@ model unloads itself when idle so memory ramps up only while you use it.
 | `tiny`           | ~75 MB                  | fastest, lowest accuracy       |
 | `base`           | ~150 MB                 | balanced                       |
 | `small`          | ~500 MB                 | more accurate, slower on CPU   |
+| `distil-small.en`| ~250 MB                 | English-only, fast             |
+| `distil-large-v3`| ~1.5 GB                 | English-only, fast + accurate  |
+| `large-v3-turbo` | ~1.6 GB                 | **recommended** — fast + accurate, multilingual |
 | `medium`         | ~1.5 GB                 | high accuracy                  |
-| `large-v3`       | ~3 GB                   | best accuracy                  |
-| `distil-small.en` / `distil-large-v3` | lighter English-only, faster |
-| *custom*         | varies                  | any HF id or local folder      |
+| `large-v3`       | ~3 GB                   | best accuracy, slowest         |
+| *custom*         | varies                  | any HF CTranslate2 id or local folder |
+
+You can also **delete** a downloaded model from the Models tab to free disk
+space (it re-downloads if you pick it again).
 
 Only one model is resident at a time, and it unloads when idle (Settings →
 *Free RAM when idle*), so an idle Murmur isn't holding a model in memory.

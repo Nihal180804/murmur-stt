@@ -202,6 +202,7 @@ class MurmurGUI(ctk.CTk):
         self.models_scroll = ctk.CTkScrollableFrame(f, corner_radius=12)
         self.models_scroll.pack(fill="both", expand=True)
         self.model_rows = {}
+        self.model_del_buttons = {}
         for name, note in E.AVAILABLE_MODELS:
             self._model_row(self.models_scroll, name, note)
 
@@ -209,7 +210,7 @@ class MurmurGUI(ctk.CTk):
         custom.pack(fill="x", pady=(12, 0))
         ctk.CTkLabel(custom, text="Load a custom open-source model",
                      font=ctk.CTkFont(size=14, weight="bold")).grid(row=0, column=0, columnspan=2, padx=14, pady=(12, 2), sticky="w")
-        ctk.CTkLabel(custom, text="A Hugging Face id (e.g. deepdml/faster-whisper-large-v3-turbo-ct2) or a local folder.",
+        ctk.CTkLabel(custom, text="A Hugging Face CTranslate2 model id or a local model folder.",
                      text_color="gray60", font=ctk.CTkFont(size=12)).grid(row=1, column=0, columnspan=2, padx=14, sticky="w")
         self.custom_entry = ctk.CTkEntry(custom, placeholder_text="model id or path")
         self.custom_entry.grid(row=2, column=0, padx=(14, 8), pady=12, sticky="ew")
@@ -228,8 +229,12 @@ class MurmurGUI(ctk.CTk):
         ctk.CTkLabel(row, text=note, text_color="gray60", font=ctk.CTkFont(size=12), anchor="w").grid(
             row=0, column=1, padx=6, pady=10, sticky="w")
         btn = ctk.CTkButton(row, text="Use", width=96, command=lambda n=name: self._select_model(n))
-        btn.grid(row=0, column=2, padx=(6, 14), pady=8)
+        btn.grid(row=0, column=2, padx=(6, 6), pady=8)
         self.model_rows[name] = btn
+        delbtn = ctk.CTkButton(row, text="🗑", width=40, fg_color=("gray75", "gray30"),
+                               hover_color="#B91C1C", command=lambda n=name: self._delete_model(n))
+        delbtn.grid(row=0, column=3, padx=(0, 14), pady=8)
+        self.model_del_buttons[name] = delbtn
         self._refresh_model_buttons()
         return row
 
@@ -242,6 +247,9 @@ class MurmurGUI(ctk.CTk):
                 btn.configure(text="Use", fg_color=("gray75", "gray30"), hover_color=("gray70", "gray35"))
             else:
                 btn.configure(text="Download", fg_color=("gray75", "gray30"), hover_color=("gray70", "gray35"))
+            dbtn = self.model_del_buttons.get(name)
+            if dbtn is not None:
+                dbtn.configure(state="normal" if E.is_downloaded(name) else "disabled")
 
     def _select_model(self, key, custom=False):
         if custom:
@@ -259,6 +267,23 @@ class MurmurGUI(ctk.CTk):
         val = self.custom_entry.get().strip()
         if val:
             self._select_model(val, custom=True)
+
+    def _delete_model(self, name):
+        if not E.is_downloaded(name):
+            return
+        import tkinter.messagebox as mbox
+        mb = E.dir_size_mb(E.cache_dir_for(name))
+        if not mbox.askyesno("Delete model",
+                             f"Delete '{name}' and free ~{mb:.0f} MB?\n"
+                             "You can re-download it later."):
+            return
+        if self.eng.model_key == name:
+            self.eng.unload_model()
+        freed = E.delete_model(name)
+        self._refresh_model_buttons()
+        self.model_progress.set(0)
+        self.model_status.configure(text=f"Deleted {name} — freed {freed:.0f} MB")
+        self.eng.notify(f"Deleted {name} — freed {freed:.0f} MB")
 
     def _run_download(self, key):
         if not E.is_downloaded(key):

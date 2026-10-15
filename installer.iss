@@ -5,7 +5,7 @@
 ; Download Inno Setup (free): https://jrsoftware.org/isdl.php
 
 #define MyAppName "Murmur"
-#define MyAppVersion "1.1.1"
+#define MyAppVersion "1.1.2"
 #define MyAppPublisher "Murmur"
 #define MyAppExeName "Murmur.exe"
 
