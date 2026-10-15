@@ -66,7 +66,10 @@ def main():
 
     eng.start_hotkey()
 
-    if eng.cfg.get("preload_on_start"):
+    # Warm up the model at launch so the first dictation is instant — but only
+    # if it's already downloaded, to avoid a surprise multi-hundred-MB download.
+    if eng.cfg.get("preload_on_start") or (
+            eng.cfg.get("warm_on_launch", True) and E.is_downloaded(eng.active_model_key())):
         threading.Thread(target=eng.ensure_model, daemon=True).start()
     if eng.cfg.get("check_updates_on_start") and eng.cfg.get("update_repo"):
         threading.Thread(target=lambda: eng.check_for_updates(quiet=True), daemon=True).start()

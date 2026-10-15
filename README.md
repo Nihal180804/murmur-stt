@@ -24,8 +24,12 @@ model unloads itself when idle so memory ramps up only while you use it.
   Hugging Face model id / local CTranslate2 folder.
 - **Low idle RAM** — heavy libraries import lazily; the model loads on first use
   and unloads after an idle timeout you choose.
-- **Per-dictation notifications** — a toast when it starts listening and when the
-  text is ready (toggle in Settings).
+- **Chime cues** — a short rising tone when recording starts and a falling tone
+  when the text is ready (toggle in Settings). Windows toast notifications are
+  also available but **off by default**.
+- **Download ahead with progress** — the Models tab shows which models are
+  downloaded and fetches new ones with a progress bar, and the selected model
+  warms up at launch (if already downloaded) so the first dictation is instant.
 - **System tray** — closing the window hides to tray; right-click to reopen/quit.
 - **Start with Windows**, **in-app update check**, **one-click installer**.
 

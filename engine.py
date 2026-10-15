@@ -16,7 +16,7 @@ import threading
 import time
 
 APP_NAME = "Murmur"
-APP_VERSION = "1.1.0"  # keep in sync with installer.iss
+APP_VERSION = "1.1.1"  # keep in sync with installer.iss
 CONFIG_DIR = os.path.join(os.environ.get("APPDATA", os.path.expanduser("~")), APP_NAME)
 CONFIG_PATH = os.path.join(CONFIG_DIR, "config.json")
 
@@ -32,6 +32,12 @@ AVAILABLE_MODELS = [
     ("distil-small.en", "~250 MB · English, fast"),
     ("distil-large-v3", "~1.5 GB · English, accurate"),
 ]
+
+# Approximate on-disk download sizes (MB), used for the download progress bar.
+APPROX_MB = {
+    "tiny": 75, "base": 145, "small": 484, "medium": 1530, "large-v3": 3090,
+    "distil-small.en": 260, "distil-large-v3": 1510,
+}
 
 IDLE_CHOICES = [
     ("Never (keep in RAM)", 0),
@@ -60,7 +66,9 @@ DEFAULTS = {
     "min_record_seconds": 0.3,
     "idle_unload_seconds": 300,
     "preload_on_start": False,
-    "notify_on_dictation": True,  # toast on each dictation
+    "warm_on_launch": True,        # load the model at launch IF already downloaded
+    "chime": True,                 # play a short sound when recording starts/ends
+    "notify_on_dictation": False,  # Windows toast on each dictation (off by default)
     "configured": False,
     "update_repo": "Nihal180804/murmur-stt",
     "check_updates_on_start": False,
@@ -130,6 +138,72 @@ def fetch_latest_release(repo):
     return str(data.get("tag_name", "")).lstrip("vV"), data.get("html_url", f"https://github.com/{repo}/releases")
 
 
+def model_repo(key):
+    """Hugging Face repo id for a built-in model key, or the key itself for a
+    custom id / local path."""
+    try:
+        from faster_whisper.utils import _MODELS
+        if key in _MODELS:
+            return _MODELS[key]
+    except Exception:
+        pass
+    builtin = {m for m, _ in AVAILABLE_MODELS}
+    if key in builtin and "/" not in key and not os.path.isdir(key):
+        if key.startswith("distil-"):
+            return "Systran/faster-distil-whisper-" + key[len("distil-"):]
+        return "Systran/faster-whisper-" + key
+    return key
+
+
+def _hub_cache_dir(repo):
+    try:
+        from huggingface_hub.constants import HF_HUB_CACHE
+        return os.path.join(HF_HUB_CACHE, "models--" + repo.replace("/", "--"))
+    except Exception:
+        return None
+
+
+def cache_dir_for(key):
+    repo = model_repo(key)
+    if "/" not in repo:
+        return repo if os.path.isdir(repo) else None
+    return _hub_cache_dir(repo)
+
+
+def dir_size_mb(path):
+    total = 0
+    if not path or not os.path.isdir(path):
+        return 0.0
+    for root, _dirs, files in os.walk(path):
+        for f in files:
+            try:
+                total += os.path.getsize(os.path.join(root, f))
+            except OSError:
+                pass
+    return total / (1024 * 1024)
+
+
+def is_downloaded(key):
+    repo = model_repo(key)
+    if "/" not in repo:
+        return os.path.isdir(repo)
+    try:
+        from huggingface_hub import try_to_load_from_cache
+        return isinstance(try_to_load_from_cache(repo, "model.bin"), str)
+    except Exception:
+        d = _hub_cache_dir(repo)
+        return bool(d and os.path.isdir(d) and dir_size_mb(d) > 1)
+
+
+def download_model_blocking(key):
+    """Download a model into the HF cache (no-op for an existing local path)."""
+    repo = model_repo(key)
+    if "/" not in repo and os.path.isdir(repo):
+        return repo
+    from faster_whisper.utils import download_model
+    return download_model(key)
+
+
 class MurmurEngine:
     def __init__(self):
         self.cfg = load_config()
@@ -164,6 +238,23 @@ class MurmurEngine:
                 self.on_status(status)
             except Exception:
                 pass
+
+    def chime(self, started):
+        """Play a short audio cue (rising on start, falling on finish)."""
+        if not self.cfg.get("chime", True):
+            return
+        def run():
+            try:
+                import winsound
+                if started:
+                    winsound.Beep(784, 70)   # G5
+                    winsound.Beep(1047, 90)  # C6 (rising = listening)
+                else:
+                    winsound.Beep(1047, 60)  # C6
+                    winsound.Beep(784, 80)   # G5 (falling = done)
+            except Exception:
+                pass
+        threading.Thread(target=run, daemon=True).start()
 
     def notify(self, message, title=APP_NAME):
         print(f"[{APP_NAME}] {message}")
@@ -259,6 +350,7 @@ class MurmurEngine:
             self.notify(f"Mic error: {exc}")
             return
         self._set_status(LISTENING)
+        self.chime(True)
         if self.cfg.get("notify_on_dictation"):
             self.notify("Listening…", f"{APP_NAME} 🎤")
 
@@ -309,6 +401,7 @@ class MurmurEngine:
                 except Exception:
                     pass
             self._deliver(text)
+            self.chime(False)
             if self.cfg.get("notify_on_dictation"):
                 preview = text if len(text) <= 120 else text[:117] + "…"
                 self.notify(preview, f"{APP_NAME} ✓")

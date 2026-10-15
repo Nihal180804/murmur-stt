@@ -11,6 +11,7 @@ import os
 import queue
 import sys
 import threading
+import time
 import webbrowser
 
 import customtkinter as ctk
@@ -187,6 +188,17 @@ class MurmurGUI(ctk.CTk):
         f = ctk.CTkFrame(self.container, fg_color="transparent")
         self._title(f, "Models", "Pick a built-in Whisper model, or load any open-source model by name or path.")
 
+        # download progress (hidden text until a download runs)
+        prog = ctk.CTkFrame(f, corner_radius=10)
+        prog.pack(fill="x", pady=(0, 8))
+        prog.grid_columnconfigure(0, weight=1)
+        self.model_status = ctk.CTkLabel(prog, text="Click a model to download / select it.",
+                                         text_color="gray60", font=ctk.CTkFont(size=12), anchor="w")
+        self.model_status.grid(row=0, column=0, padx=14, pady=(10, 2), sticky="w")
+        self.model_progress = ctk.CTkProgressBar(prog, progress_color=ACCENT)
+        self.model_progress.set(0)
+        self.model_progress.grid(row=1, column=0, padx=14, pady=(0, 12), sticky="ew")
+
         self.models_scroll = ctk.CTkScrollableFrame(f, corner_radius=12)
         self.models_scroll.pack(fill="both", expand=True)
         self.model_rows = {}
@@ -215,7 +227,7 @@ class MurmurGUI(ctk.CTk):
             row=0, column=0, padx=(14, 6), pady=10, sticky="w")
         ctk.CTkLabel(row, text=note, text_color="gray60", font=ctk.CTkFont(size=12), anchor="w").grid(
             row=0, column=1, padx=6, pady=10, sticky="w")
-        btn = ctk.CTkButton(row, text="Use", width=80, command=lambda n=name: self._use_model(n))
+        btn = ctk.CTkButton(row, text="Use", width=96, command=lambda n=name: self._select_model(n))
         btn.grid(row=0, column=2, padx=(6, 14), pady=8)
         self.model_rows[name] = btn
         self._refresh_model_buttons()
@@ -226,27 +238,59 @@ class MurmurGUI(ctk.CTk):
         for name, btn in self.model_rows.items():
             if name == active:
                 btn.configure(text="Active ✓", fg_color=ACCENT, hover_color=ACCENT_HOVER)
-            else:
+            elif E.is_downloaded(name):
                 btn.configure(text="Use", fg_color=("gray75", "gray30"), hover_color=("gray70", "gray35"))
+            else:
+                btn.configure(text="Download", fg_color=("gray75", "gray30"), hover_color=("gray70", "gray35"))
 
-    def _use_model(self, name):
-        self.eng.cfg["model"] = name
-        self.eng.cfg["custom_model"] = ""
+    def _select_model(self, key, custom=False):
+        if custom:
+            self.eng.cfg["custom_model"] = key
+        else:
+            self.eng.cfg["model"] = key
+            self.eng.cfg["custom_model"] = ""
+            self.custom_entry.delete(0, "end")
         E.save_config(self.eng.cfg)
-        self.custom_entry.delete(0, "end")
         self.eng.unload_model()
         self._refresh_model_buttons()
-        self.eng.notify(f"Model set to '{name}' — loads on next dictation.")
+        threading.Thread(target=self._run_download, args=(self.eng.active_model_key(),), daemon=True).start()
 
     def _load_custom(self):
         val = self.custom_entry.get().strip()
-        if not val:
-            return
-        self.eng.cfg["custom_model"] = val
-        E.save_config(self.eng.cfg)
-        self.eng.unload_model()
-        self._refresh_model_buttons()
-        self.eng.notify(f"Custom model set: {val}")
+        if val:
+            self._select_model(val, custom=True)
+
+    def _run_download(self, key):
+        if not E.is_downloaded(key):
+            self.q.put(("dl", (0.0, f"Downloading {key}…")))
+            stop = threading.Event()
+            threading.Thread(target=self._poll_download, args=(key, stop), daemon=True).start()
+            try:
+                E.download_model_blocking(key)
+            except Exception as exc:
+                stop.set()
+                self.q.put(("dl", (-1, f"Download failed: {exc}")))
+                return
+            stop.set()
+        self.q.put(("dl", (0.99, f"Loading {key}…")))
+        try:
+            self.eng.ensure_model()
+            self.q.put(("dl", (1.0, f"{key} ready ✓")))
+        except Exception as exc:
+            self.q.put(("dl", (-1, f"Load failed: {exc}")))
+        self.q.put(("models_refresh", None))
+
+    def _poll_download(self, key, stop):
+        approx = E.APPROX_MB.get(key, 0)
+        cdir = E.cache_dir_for(key)
+        while not stop.is_set():
+            mb = E.dir_size_mb(cdir)
+            if approx:
+                frac = min(mb / approx, 0.99)
+                self.q.put(("dl", (frac, f"Downloading {key}…  {mb:.0f} / ~{approx} MB")))
+            else:
+                self.q.put(("dl", (-2, f"Downloading {key}…  {mb:.0f} MB")))
+            time.sleep(0.5)
 
     # Settings ---------------------------------------------------------------
     def _page_settings(self):
@@ -299,7 +343,12 @@ class MurmurGUI(ctk.CTk):
         self.idle_menu.grid(row=0, column=1, rowspan=2, padx=(0, 14), pady=10)
 
         # Switches
-        self.sw_notify = self._switch(f, "Notify me on every dictation", cfg["notify_on_dictation"], self._set_notify)
+        self.sw_chime = self._switch(f, "Chime when recording starts / ends",
+                                     cfg.get("chime", True), self._set_chime)
+        self.sw_notify = self._switch(f, "Windows notification on every dictation",
+                                      cfg.get("notify_on_dictation", False), self._set_notify)
+        self.sw_warm = self._switch(f, "Warm up model at launch (if already downloaded)",
+                                    cfg.get("warm_on_launch", True), self._set_warm)
         self.sw_startup = self._switch(f, "Start with Windows", self._startup_present(), self._set_startup)
         self.sw_preload = self._switch(f, "Load model at launch (no first-use wait, more idle RAM)",
                                        cfg["preload_on_start"], self._set_preload)
@@ -350,8 +399,18 @@ class MurmurGUI(ctk.CTk):
         E.save_config(self.eng.cfg)
         self.eng._schedule_idle_unload()
 
+    def _set_chime(self, on):
+        self.eng.cfg["chime"] = on
+        E.save_config(self.eng.cfg)
+        if on:
+            self.eng.chime(True)  # preview
+
     def _set_notify(self, on):
         self.eng.cfg["notify_on_dictation"] = on
+        E.save_config(self.eng.cfg)
+
+    def _set_warm(self, on):
+        self.eng.cfg["warm_on_launch"] = on
         E.save_config(self.eng.cfg)
 
     def _set_preload(self, on):
@@ -397,9 +456,30 @@ class MurmurGUI(ctk.CTk):
                     self._refresh_status(payload)
                 elif kind == "transcript":
                     self._append_history(payload)
+                elif kind == "dl":
+                    self._update_dl(payload)
+                elif kind == "models_refresh":
+                    self._refresh_model_buttons()
         except queue.Empty:
             pass
         self.after(120, self._drain_queue)
+
+    def _update_dl(self, payload):
+        frac, text = payload
+        if not hasattr(self, "model_status"):
+            return
+        self.model_status.configure(text=text)
+        if frac == -2:  # unknown total -> indeterminate
+            self.model_progress.configure(mode="indeterminate")
+            self.model_progress.start()
+        elif frac == -1:  # error
+            self.model_progress.stop()
+            self.model_progress.configure(mode="determinate")
+            self.model_progress.set(0)
+        else:
+            self.model_progress.stop()
+            self.model_progress.configure(mode="determinate")
+            self.model_progress.set(frac)
 
     def _refresh_status(self, status):
         color, label = STATUS_COLORS.get(status, STATUS_COLORS[E.IDLE])
