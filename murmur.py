@@ -76,7 +76,7 @@ DEFAULTS = {
     "idle_unload_seconds": 300,  # free the model after this long idle; 0 = never
     "preload_on_start": False,   # keep idle RAM minimal by NOT loading at launch
     "configured": False,         # set True after the first-run picker
-    "update_repo": "",           # "owner/repo" on GitHub to check releases against
+    "update_repo": "Nihal180804/murmur-stt",  # GitHub repo to check releases against
     "check_updates_on_start": False,
 }
 
